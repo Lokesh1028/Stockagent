@@ -1,0 +1,442 @@
+{
+  "name": "1. Data Collection - Multi-User Insider Trading",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger (Hourly)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "finnhub-key",
+              "name": "finnhubApiKey",
+              "value": "={{ $env.FINNHUB_API_KEY }}",
+              "type": "string"
+            },
+            {
+              "id": "supabase-url",
+              "name": "supabaseUrl",
+              "value": "={{ $env.SUPABASE_URL }}",
+              "type": "string"
+            },
+            {
+              "id": "supabase-key",
+              "name": "supabaseKey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}",
+              "type": "string"
+            },
+            {
+              "id": "from-date",
+              "name": "fromDate",
+              "value": "={{ $now.minus({ days: 7 }).toFormat('yyyy-MM-dd') }}",
+              "type": "string"
+            },
+            {
+              "id": "to-date",
+              "name": "toDate",
+              "value": "={{ $now.toFormat('yyyy-MM-dd') }}",
+              "type": "string"
+            },
+            {
+              "id": "execution-id",
+              "name": "executionId",
+              "value": "={{ $execution.id }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "get-env-vars",
+      "name": "Get Environment Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "=https://finnhub.io/api/v1/stock/insider-transactions?from={{ $json.fromDate }}&to={{ $json.toDate }}&token={{ $json.finnhubApiKey }}",
+        "options": {
+          "timeout": 30000,
+          "retry": {
+            "maxTries": 3,
+            "waitBetweenTries": 2000
+          }
+        }
+      },
+      "id": "fetch-transactions",
+      "name": "Fetch Insider Transactions",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validate API Response\nconst response = $input.all()[0].json;\n\n// Check if response exists\nif (!response) {\n  console.error('No response from Finnhub API');\n  return [{\n    json: {\n      hasData: false,
+      error: 'No response from Finnhub API',\n      data: [],\n      message: 'API request failed'\n    }\n  }];\n}\n\n// Check if data exists and is array\nif (!response.data || !Array.isArray(response.data)) {\n  console.warn('Invalid API response structure:', JSON.stringify(response).substring(0, 200));\n  return [{\n    json: {\n      hasData: false,\n      error: 'Invalid API response structure',\n      data: [],\n      message: 'Invalid API response from Finnhub'\n    }\n  }];\n}\n\n// Check if data is empty\nif (response.data.length === 0) {\n  console.log('No insider transactions found in date range');\n  return [{\n    json: {\n      hasData: false,\n      error: null,\n      data: [],\n      message: 'No insider transactions found in the specified date range'\n    }\n  }];\n}\n\n// Return valid data\nconsole.log(`Successfully fetched ${response.data.length} transactions`);\nreturn [{\n  json: {\n    hasData: true,\n    error: null,\n    data: response.data,\n    count: response.data.length,\n    message: 'Data fetched successfully',\n    fetchedAt: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "validate-response",
+      "name": "Validate API Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.hasData }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-has-data",
+      "name": "Check Has Data",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Process and Analyze Transactions\nconst input = $input.all()[0].json;\n\nif (!input.hasData || !input.data || input.data.length === 0) {\n  console.log('No transactions to process');\n  return [];\n}\n\nconst transactions = input.data;\nconsole.log('Processing', transactions.length, 'transactions');\n\n// Group transactions by symbol and calculate net insider activity\nconst stockActivity = {};\n\ntransactions.forEach(transaction => {\n  const symbol = transaction.symbol || 'N/A';\n  \n  if (symbol === 'N/A' || !symbol) {\n    return;\n  }\n  \n  const shares = Math.abs(parseFloat(transaction.share) || 0);\n  const price = parseFloat(transaction.transactionPrice) || 0;\n  const transactionValue = shares * price;\n  const netChange = parseFloat(transaction.change) || 0;\n  const isBuy = netChange > 0;\n  const isSell = netChange < 0;\n  \n  // Initialize stock if not exists\n  if (!stockActivity[symbol]) {\n    stockActivity[symbol] = {\n      symbol: symbol,\n      netMoneyFlow: 0,\n      netSharesChange: 0,\n      totalInsiders: 0,\n      buyersCount: 0,\n      sellersCount: 0,\n      transactions: [],\n      insiders: {}\n    };\n  }\n  \n  const stock = stockActivity[symbol];\n  \n  // Calculate net money flow\n  if (isBuy) {\n    stock.netMoneyFlow += transactionValue;\n    stock.netSharesChange += shares;\n    stock.buyersCount++;\n  } else if (isSell) {\n    stock.netMoneyFlow -= transactionValue;\n    stock.netSharesChange -= shares;\n    stock.sellersCount++;\n  }\n  \n  // Track individual insider\n  const insiderName = transaction.name || 'Unknown';\n  if (!stock.insiders[insiderName]) {\n    stock.insiders[insiderName] = {\n      name: insiderName,\n      totalBuyValue: 0,\n      totalSellValue: 0,\n      buyCount: 0,\n      sellCount: 0,\n      netValue: 0\n    };\n    stock.totalInsiders++;\n  }\n  \n  const insider = stock.insiders[insiderName];\n  if (isBuy) {\n    insider.totalBuyValue += transactionValue;\n    insider.buyCount++;\n  } else if (isSell) {\n    insider.totalSellValue += transactionValue;\n    insider.sellCount++;\n  }\n  insider.netValue = insider.totalBuyValue - insider.totalSellValue;\n  \n  // Store transaction details\n  stock.transactions.push({\n    date: transaction.transactionDate,\n    insiderName: insiderName,\n    shares: shares,\n    price: price,\n    value: transactionValue,\n    type: isBuy ? 'BUY' : isSell ? 'SELL' : 'OTHER',\n    netChange: netChange,\n    filingDate: transaction.filingDate || ''\n  });\n});\n\n// Convert to array and analyze\nconst analyzedStocks = Object.values(stockActivity)\n  .filter(stock => Math.abs(stock.netMoneyFlow) > 0)\n  .map(stock => {\n    const netFlow = stock.netMoneyFlow;\n    const absFlow = Math.abs(netFlow);\n    const flowMM = absFlow / 1000000;\n    \n    // Determine activity type\n    let activityType = 'NO NET ACTIVITY';\n    if (netFlow > 0) activityType = 'NET BUYING';\n    else if (netFlow < 0) activityType = 'NET SELLING';\n    \n    // Generate recommendation\n    let recommendation = 'HOLD';\n    let confidence = 'LOW';\n    \n    if (absFlow > 5000000) {\n      recommendation = netFlow > 0 ? '🚀 STRONG BUY' : '⚠️ CAUTION';\n      confidence = 'HIGH';\n    } else if (absFlow > 1000000) {\n      recommendation = netFlow > 0 ? '📈 BUY' : '👀 MONITOR';\n      confidence = 'MEDIUM';\n    } else if (absFlow > 100000) {\n      recommendation = '📊 HOLD';\n      confidence = 'LOW';\n    }\n    \n    // Top insiders\n    const topInsiders = Object.values(stock.insiders)\n      .sort((a, b) => Math.abs(b.netValue) - Math.abs(a.netValue))\n      .slice(0, 5)\n      .map(insider => ({\n        name: insider.name,\n        netValue: insider.netValue,\n        netValueFormatted: `$${(Math.abs(insider.netValue) / 1000000).toFixed(2)}M`,\n        activity: insider.netValue > 0 ? 'BUYING' : insider.netValue < 0 ? 'SELLING' : 'NEUTRAL',\n        buyCount: insider.buyCount,\n        sellCount: insider.sellCount\n      }));\n    \n    return {\n      symbol: stock.symbol,\n      netMoneyFlow: netFlow,\n      netMoneyFlowFormatted: `$${flowMM.toFixed(2)}M ${netFlow >= 0 ? '(BUY)' : '(SELL)'}`,\n      netSharesChange: stock.netSharesChange,\n      activityType: activityType,\n      totalInsiders: stock.totalInsiders,\n      buyersCount: stock.buyersCount,\n      sellersCount: stock.sellersCount,\n      recommendation: recommendation,\n      confidence: confidence,\n      topInsiders: topInsiders,\n      transactionCount: stock.transactions.length,\n      transactions: stock.transactions,\n      analysisDate: new Date().toISOString().split('T')[0],\n      analysisTimestamp: new Date().toISOString()\n    };\n  })\n  .sort((a, b) => Math.abs(b.netMoneyFlow) - Math.abs(a.netMoneyFlow));\n\nconsole.log('Analyzed', analyzedStocks.length, 'stocks with insider activity');\n\nif (analyzedStocks.length === 0) {\n  return [];\n}\n\nreturn analyzedStocks.map(stock => ({ json: stock }));"
+      },
+      "id": "process-analyze",
+      "name": "Process and Analyze Transactions",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.supabaseUrl }}/rest/v1/stock_analysis",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.supabaseKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.supabaseKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Prefer",
+              "value": "resolution=merge-duplicates"
+            }
+          ]
+        },
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "symbol",
+              "value": "={{ $json.symbol }}"
+            },
+            {
+              "name": "analysis_date",
+              "value": "={{ $json.analysisDate }}"
+            },
+            {
+              "name": "net_money_flow",
+              "value": "={{ $json.netMoneyFlow }}"
+            },
+            {
+              "name": "net_shares_change",
+              "value": "={{ $json.netSharesChange }}"
+            },
+            {
+              "name": "total_insiders",
+              "value": "={{ $json.totalInsiders }}"
+            },
+            {
+              "name": "buyers_count",
+              "value": "={{ $json.buyersCount }}"
+            },
+            {
+              "name": "sellers_count",
+              "value": "={{ $json.sellersCount }}"
+            },
+            {
+              "name": "activity_type",
+              "value": "={{ $json.activityType }}"
+            },
+            {
+              "name": "recommendation",
+              "value": "={{ $json.recommendation }}"
+            },
+            {
+              "name": "confidence_level",
+              "value": "={{ $json.confidence }}"
+            },
+            {
+              "name": "detailed_analysis",
+              "value": "={{ JSON.stringify($json) }}"
+            }
+          ]
+        },
+        "options": {
+          "retry": {
+            "maxTries": 3,
+            "waitBetweenTries": 1000
+          }
+        }
+      },
+      "id": "store-supabase",
+      "name": "Store Analysis in Supabase",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1560,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.N8N_WEBHOOK_URL }}/workflow-2-alert-distribution",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ executionId: $('Get Environment Variables').item.json.executionId, stockCount: $('Process and Analyze Transactions').all().length, timestamp: new Date().toISOString(), analysisDate: $now.toFormat('yyyy-MM-dd') }) }}",
+        "options": {}
+      },
+      "id": "trigger-distribution",
+      "name": "Trigger Alert Distribution",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1780,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Log No Data\nconsole.log('No insider trading data to process');\n\nconst input = $input.all()[0].json;\n\nreturn [{\n  json: {\n    status: 'no_data',\n    message: input.message || 'No insider transactions found',\n    executionId: $('Get Environment Variables').item.json.executionId,\n    timestamp: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "log-no-data",
+      "name": "Log No Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Get Environment Variables').item.json.supabaseUrl }}/rest/v1/system_logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Get Environment Variables').item.json.supabaseKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Environment Variables').item.json.supabaseKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "log_level",
+              "value": "INFO"
+            },
+            {
+              "name": "workflow_name",
+              "value": "Data Collection"
+            },
+            {
+              "name": "node_name",
+              "value": "Completion"
+            },
+            {
+              "name": "message",
+              "value": "=Workflow completed. Processed {{ $('Process and Analyze Transactions').all().length }} stocks"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ JSON.stringify({ executionId: $('Get Environment Variables').item.json.executionId, stockCount: $('Process and Analyze Transactions').all().length }) }}"
+            }
+          ]
+        }
+      },
+      "id": "log-completion",
+      "name": "Log Workflow Completion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2000,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger (Hourly)": {
+      "main": [
+        [
+          {
+            "node": "Get Environment Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Environment Variables": {
+      "main": [
+        [
+          {
+            "node": "Fetch Insider Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Insider Transactions": {
+      "main": [
+        [
+          {
+            "node": "Validate API Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate API Response": {
+      "main": [
+        [
+          {
+            "node": "Check Has Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Has Data": {
+      "main": [
+        [
+          {
+            "node": "Process and Analyze Transactions",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Log No Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process and Analyze Transactions": {
+      "main": [
+        [
+          {
+            "node": "Store Analysis in Supabase",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Analysis in Supabase": {
+      "main": [
+        [
+          {
+            "node": "Trigger Alert Distribution",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Trigger Alert Distribution": {
+      "main": [
+        [
+          {
+            "node": "Log Workflow Completion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "versionId": "multi-user-v2",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "insider-trading-alerts-multi-user"
+  },
+  "tags": [
+    {
+      "name": "multi-user"
+    },
+    {
+      "name": "data-collection"
+    }
+  ]
+}

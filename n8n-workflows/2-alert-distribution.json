@@ -1,0 +1,609 @@
+{
+  "name": "2. Alert Distribution - Multi-User",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "workflow-2-alert-distribution",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "multi-user-distribution"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "supabase-url",
+              "name": "supabaseUrl",
+              "value": "={{ $env.SUPABASE_URL }}",
+              "type": "string"
+            },
+            {
+              "id": "supabase-key",
+              "name": "supabaseKey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}",
+              "type": "string"
+            },
+            {
+              "id": "analysis-date",
+              "name": "analysisDate",
+              "value": "={{ $json.body.analysisDate || $now.toFormat('yyyy-MM-dd') }}",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "id": "get-env-vars",
+      "name": "Get Environment Variables",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.supabaseUrl }}/rest/v1/stock_analysis",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $json.supabaseKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.supabaseKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "analysis_date",
+              "value": "=eq.{{ $json.analysisDate }}"
+            },
+            {
+              "name": "order",
+              "value": "net_money_flow.desc.nullslast"
+            },
+            {
+              "name": "select",
+              "value": "*"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-stock-analysis",
+      "name": "Get Today's Stock Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Get Environment Variables').item.json.supabaseUrl }}/rest/v1/users",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Get Environment Variables').item.json.supabaseKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Environment Variables').item.json.supabaseKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "is_active",
+              "value": "eq.true"
+            },
+            {
+              "name": "subscription_status",
+              "value": "eq.active"
+            },
+            {
+              "name": "select",
+              "value": "*"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-active-users",
+      "name": "Get Active Users",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-users",
+      "name": "Loop Through Users",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Get Environment Variables').item.json.supabaseUrl }}/rest/v1/user_preferences",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Get Environment Variables').item.json.supabaseKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Environment Variables').item.json.supabaseKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "=eq.{{ $json.id }}"
+            },
+            {
+              "name": "select",
+              "value": "*"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "get-user-prefs",
+      "name": "Get User Preferences",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1340,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter Stocks Based on User Preferences\nconst user = $('Loop Through Users').item.json;\nconst preferences = $input.all()[0].json[0] || {};\nconst allStocks = $('Get Today\\'s Stock Analysis').all().map(item => {\n  const detailed = JSON.parse(item.json.detailed_analysis || '{}');\n  return {\n    ...item.json,\n    ...detailed\n  };\n});\n\nconsole.log(`Filtering stocks for user: ${user.email}`);\nconsole.log(`User tier: ${user.subscription_tier}`);\nconsole.log(`Total stocks available: ${allStocks.length}`);\n\n// Apply tier limits\nlet maxStocks = 5; // Free tier default\nif (user.subscription_tier === 'pro') maxStocks = 20;\nif (user.subscription_tier === 'enterprise') maxStocks = 50;\n\n// Apply user preferences\nconst thresholdAmount = preferences.threshold_amount || 50000;\nconst watchlistSymbols = preferences.watchlist_symbols || [];\nconst excludedSymbols = preferences.excluded_symbols || [];\nconst minTransactionValue = preferences.min_transaction_value || 0;\nconst includeBuys = preferences.include_buys !== false;\nconst includeSells = preferences.include_sells !== false;\n\n// Filter stocks\nlet filteredStocks = allStocks.filter(stock => {\n  // Exclude symbols\n  if (excludedSymbols.includes(stock.symbol)) {\n    return false;\n  }\n  \n  // Watchlist (if specified, only include these)\n  if (watchlistSymbols.length > 0 && !watchlistSymbols.includes(stock.symbol)) {\n    return false;\n  }\n  \n  // Threshold\n  if (Math.abs(stock.net_money_flow || 0) < thresholdAmount) {\n    return false;\n  }\n  \n  // Min transaction value\n  if (Math.abs(stock.net_money_flow || 0) < minTransactionValue) {\n    return false;\n  }\n  \n  // Buy/Sell preferences\n  const isBuy = (stock.net_money_flow || 0) > 0;\n  const isSell = (stock.net_money_flow || 0) < 0;\n  \n  if (isBuy && !includeBuys) return false;\n  if (isSell && !includeSells) return false;\n  \n  return true;\n});\n\n// Apply max stocks limit\nfilteredStocks = filteredStocks.slice(0, maxStocks);\n\nconsole.log(`Filtered to ${filteredStocks.length} stocks for ${user.email}`);\n\nif (filteredStocks.length === 0) {\n  return [{\n    json: {\n      user: user,\n      preferences: preferences,\n      stocks: [],\n      shouldSendAlert: false,\n      message: 'No stocks match user preferences'\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    user: user,\n    preferences: preferences,\n    stocks: filteredStocks,\n    shouldSendAlert: true,\n    stockCount: filteredStocks.length\n  }\n}];"
+      },
+      "id": "filter-stocks",
+      "name": "Filter Stocks by Preferences",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.shouldSendAlert }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "check-send-alert",
+      "name": "Should Send Alert?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1780,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Email Alert Message\nconst data = $input.all()[0].json;\nconst user = data.user;\nconst stocks = data.stocks;\n\nconst dateStr = new Date().toLocaleDateString('en-US', { \n  month: 'short', \n  day: 'numeric', \n  year: 'numeric' \n});\n\nlet emailBody = `\n<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .header { background: #2563eb; color: white; padding: 20px; text-align: center; }\n    .content { padding: 20px; }\n    .stock { background: #f3f4f6; border-left: 4px solid #2563eb; padding: 15px; margin: 20px 0; }\n    .buy { border-left-color: #10b981; }\n    .sell { border-left-color: #ef4444; }\n    .metric { display: inline-block; margin: 10px 20px 10px 0; }\n    .footer { background: #f3f4f6; padding: 20px; text-align: center; font-size: 12px; color: #666; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>🚨 Insider Trading Alert</h1>\n    <p>${dateStr}</p>\n  </div>\n  <div class=\"content\">\n    <p>Hi there,</p>\n    <p>We've detected <strong>${stocks.length} significant insider trading activities</strong> that match your preferences:</p>\n`;\n\nstocks.forEach((stock, index) => {\n  const isBuy = (stock.net_money_flow || 0) > 0;\n  const emoji = isBuy ? '📈' : '📉';\n  const className = isBuy ? 'stock buy' : 'stock sell';\n  \n  const flowMM = Math.abs(stock.net_money_flow || 0) / 1000000;\n  const flowFormatted = `$${flowMM.toFixed(2)}M`;\n  \n  const topInsiders = stock.topInsiders || [];\n  const topInsider = topInsiders[0];\n  \n  emailBody += `\n    <div class=\"${className}\">\n      <h2>${emoji} #${index + 1}: ${stock.symbol}</h2>\n      <div class=\"metric\">\n        <strong>Net Activity:</strong> ${flowFormatted} ${isBuy ? '(BUYING)' : '(SELLING)'}\n      </div>\n      <div class=\"metric\">\n        <strong>Insiders:</strong> ${stock.total_insiders || 0} (${stock.buyers_count || 0} buying, ${stock.sellers_count || 0} selling)\n      </div>\n      <div class=\"metric\">\n        <strong>Recommendation:</strong> ${stock.recommendation || 'N/A'}\n      </div>\n      <div class=\"metric\">\n        <strong>Confidence:</strong> ${stock.confidence_level || 'N/A'}\n      </div>\n  `;\n  \n  if (topInsider) {\n    emailBody += `\n      <p><strong>Top Insider Activity:</strong></p>\n      <p>${topInsider.name} ${topInsider.activity === 'BUYING' ? 'BOUGHT' : 'SOLD'} ${topInsider.netValueFormatted}</p>\n    `;\n  }\n  \n  emailBody += `\n    </div>\n  `;\n});\n\nemailBody += `\n    <p>For more details, <a href=\"${process.env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com'}/dashboard\">visit your dashboard</a>.</p>\n  </div>\n  <div class=\"footer\">\n    <p>This alert was generated based on your preferences. <a href=\"${process.env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com'}/settings\">Update your preferences</a></p>\n    <p>&copy; ${new Date().getFullYear()} InsiderAlerts. All rights reserved.</p>\n  </div>\n</body>\n</html>\n`;\n\nreturn [{\n  json: {\n    user: user,\n    subject: `🚨 ${stocks.length} Insider Trading Alert${stocks.length > 1 ? 's' : ''} - ${dateStr}`,\n    emailBody: emailBody,\n    stocks: stocks\n  }\n}];"
+      },
+      "id": "format-email",
+      "name": "Format Email Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Format Telegram Alert Message\nconst data = $input.all()[0].json;\nconst user = data.user;\nconst stocks = data.stocks;\n\nconst dateStr = new Date().toLocaleDateString('en-US', { \n  month: 'short', \n  day: 'numeric', \n  year: 'numeric' \n});\n\nlet message = `🔔 INSIDER TRADING ALERT\\n${dateStr}\\n\\n`;\n\nstocks.slice(0, 5).forEach((stock, index) => {\n  const isBuy = (stock.net_money_flow || 0) > 0;\n  const emoji = isBuy ? '📈' : '📉';\n  \n  const flowMM = Math.abs(stock.net_money_flow || 0) / 1000000;\n  const flowFormatted = `$${flowMM.toFixed(2)}M`;\n  \n  const topInsiders = stock.topInsiders || [];\n  const topInsider = topInsiders[0];\n  \n  message += `${emoji} #${index + 1} ${stock.symbol}\\n`;\n  \n  if (topInsider) {\n    message += `${topInsider.name} ${topInsider.activity === 'BUYING' ? 'BOUGHT' : 'SOLD'} ${topInsider.netValueFormatted}\\n`;\n  } else {\n    message += `Net: ${flowFormatted} ${isBuy ? '(BUY)' : '(SELL)'}\\n`;\n  }\n  \n  message += `Signal: ${stock.recommendation || 'N/A'}\\n\\n`;\n});\n\nif (stocks.length > 5) {\n  message += `📧 +${stocks.length - 5} more in email\\n\\n`;\n}\n\nmessage += `📊 View details in your dashboard`;\n\nreturn [{\n  json: {\n    user: user,\n    message: message,\n    stocks: stocks\n  }\n}];"
+      },
+      "id": "format-telegram",
+      "name": "Format Telegram Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2000,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.user.email }}",
+        "subject": "={{ $json.subject }}",
+        "emailType": "html",
+        "message": "={{ $json.emailBody }}",
+        "options": {}
+      },
+      "id": "send-email",
+      "name": "Send Email Alert",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        2220,
+        200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $json.user.telegram_chat_id }}",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2220,
+        400
+      ],
+      "credentials": {
+        "telegramApi": {
+          "id": "telegram-credentials",
+          "name": "Telegram Bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Get Environment Variables').item.json.supabaseUrl }}/rest/v1/alert_history",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Get Environment Variables').item.json.supabaseKey }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Get Environment Variables').item.json.supabaseKey }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "user_id",
+              "value": "={{ $('Loop Through Users').item.json.id }}"
+            },
+            {
+              "name": "alert_type",
+              "value": "insider_trade"
+            },
+            {
+              "name": "channel",
+              "value": "email"
+            },
+            {
+              "name": "delivery_status",
+              "value": "sent"
+            },
+            {
+              "name": "alert_title",
+              "value": "={{ $('Format Email Alert').item.json.subject }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ JSON.stringify({ stockCount: $('Filter Stocks by Preferences').item.json.stockCount, symbols: $('Filter Stocks by Preferences').item.json.stocks.map(s => s.symbol) }) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log-alert",
+      "name": "Log Alert to History",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2440,
+        300
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "merge-alerts",
+      "name": "Merge Alert Results",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        2440,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Alerts sent successfully', timestamp: new Date().toISOString() }) }}",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Send Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2660,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Environment Variables",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Environment Variables": {
+      "main": [
+        [
+          {
+            "node": "Get Today's Stock Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Today's Stock Analysis": {
+      "main": [
+        [
+          {
+            "node": "Get Active Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Active Users": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Through Users": {
+      "main": [
+        [
+          {
+            "node": "Get User Preferences",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get User Preferences": {
+      "main": [
+        [
+          {
+            "node": "Filter Stocks by Preferences",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Stocks by Preferences": {
+      "main": [
+        [
+          {
+            "node": "Should Send Alert?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Should Send Alert?": {
+      "main": [
+        [
+          {
+            "node": "Format Email Alert",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Format Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Loop Through Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Email Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Email Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Telegram Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email Alert": {
+      "main": [
+        [
+          {
+            "node": "Merge Alert Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Telegram Alert": {
+      "main": [
+        [
+          {
+            "node": "Merge Alert Results",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Alert Results": {
+      "main": [
+        [
+          {
+            "node": "Log Alert to History",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Alert to History": {
+      "main": [
+        [
+          {
+            "node": "Loop Through Users",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "versionId": "multi-user-v2",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "insider-trading-alerts-multi-user"
+  },
+  "tags": [
+    {
+      "name": "multi-user"
+    },
+    {
+      "name": "alert-distribution"
+    }
+  ]
+}
