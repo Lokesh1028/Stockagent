@@ -1,0 +1,469 @@
+{
+  "name": "3. User Management - Multi-User",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "user-events",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "User Events Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        400
+      ],
+      "webhookId": "user-management-events"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse and validate webhook data\nconst body = $input.all()[0].json.body;\n\nconsole.log('Received user event:', JSON.stringify(body));\n\nif (!body || !body.event) {\n  throw new Error('Invalid webhook payload: missing event type');\n}\n\nif (!body.user) {\n  throw new Error('Invalid webhook payload: missing user data');\n}\n\nreturn [{\n  json: {\n    event: body.event,\n    user: body.user,\n    metadata: body.metadata || {},\n    timestamp: body.timestamp || new Date().toISOString()\n  }\n}];"
+      },
+      "id": "parse-event",
+      "name": "Parse Event Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "output": "={{ $json.event }}",
+        "rules": {
+          "rules": [
+            {
+              "outputKey": "user.created"
+            },
+            {
+              "outputKey": "user.verified"
+            },
+            {
+              "outputKey": "subscription.created"
+            },
+            {
+              "outputKey": "subscription.updated"
+            },
+            {
+              "outputKey": "subscription.cancelled"
+            },
+            {
+              "outputKey": "password.reset"
+            }
+          ]
+        },
+        "fallbackOutput": "default"
+      },
+      "id": "route-by-event",
+      "name": "Route by Event Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        680,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.user.email }}",
+        "subject": "Welcome to InsiderAlerts! 🎉",
+        "emailType": "html",
+        "message": "=<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .header { background: #2563eb; color: white; padding: 30px; text-align: center; }\n    .content { padding: 30px; }\n    .button { display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }\n    .features { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0; }\n    .feature { margin: 10px 0; }\n    .footer { background: #f3f4f6; padding: 20px; text-align: center; font-size: 12px; color: #666; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>🚀 Welcome to InsiderAlerts!</h1>\n  </div>\n  <div class=\"content\">\n    <p>Hi {{ $json.user.email }},</p>\n    \n    <p>Thank you for joining InsiderAlerts! We're excited to help you stay ahead of the market with real-time insider trading alerts.</p>\n    \n    <div class=\"features\">\n      <h3>✨ What you get with your Free account:</h3>\n      <div class=\"feature\">📧 1 daily alert via email</div>\n      <div class=\"feature\">📊 Top 5 insider trading activities</div>\n      <div class=\"feature\">🤖 AI-powered analysis and recommendations</div>\n      <div class=\"feature\">📈 7-day historical data</div>\n    </div>\n    \n    <p><strong>Next steps:</strong></p>\n    <ol>\n      <li>Set your alert preferences in the dashboard</li>\n      <li>Choose stocks or sectors to watch</li>\n      <li>Start receiving alerts!</li>\n    </ol>\n    \n    <a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/dashboard\" class=\"button\">Go to Dashboard</a>\n    \n    <p>Want unlimited alerts and more features? <a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/pricing\">Upgrade to Pro</a> for just $19/month!</p>\n    \n    <p>Questions? Reply to this email and we'll be happy to help.</p>\n    \n    <p>Happy investing! 📈<br>\nThe InsiderAlerts Team</p>\n  </div>\n  <div class=\"footer\">\n    <p>&copy; {{ $now.year }} InsiderAlerts. All rights reserved.</p>\n    <p><a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/settings\">Manage preferences</a> | <a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/unsubscribe\">Unsubscribe</a></p>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "welcome-email",
+      "name": "Send Welcome Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        200
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.user.email }}",
+        "subject": "Email Verified - You're All Set! ✅",
+        "emailType": "html",
+        "message": "=<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .header { background: #10b981; color: white; padding: 30px; text-align: center; }\n    .content { padding: 30px; }\n    .button { display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }\n    .footer { background: #f3f4f6; padding: 20px; text-align: center; font-size: 12px; color: #666; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>✅ Email Verified!</h1>\n  </div>\n  <div class=\"content\">\n    <p>Hi there,</p>\n    \n    <p>Your email has been successfully verified. You're now ready to receive insider trading alerts!</p>\n    \n    <p>Your first alert will be sent within the next 24 hours based on your preferences.</p>\n    \n    <a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/dashboard\" class=\"button\">View Dashboard</a>\n    \n    <p>Thanks,<br>The InsiderAlerts Team</p>\n  </div>\n  <div class=\"footer\">\n    <p>&copy; {{ $now.year }} InsiderAlerts. All rights reserved.</p>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "verified-email",
+      "name": "Send Verification Confirmation",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.user.email }}",
+        "subject": "Welcome to Pro! 🚀",
+        "emailType": "html",
+        "message": "=<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; }\n    .content { padding: 30px; }\n    .features { background: #f3f4f6; padding: 20px; border-radius: 8px; margin: 20px 0; }\n    .feature { margin: 10px 0; padding-left: 30px; position: relative; }\n    .feature:before { content: '✓'; position: absolute; left: 0; color: #10b981; font-weight: bold; font-size: 20px; }\n    .button { display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }\n    .footer { background: #f3f4f6; padding: 20px; text-align: center; font-size: 12px; color: #666; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>🎉 Welcome to Pro!</h1>\n  </div>\n  <div class=\"content\">\n    <p>Hi {{ $json.user.email }},</p>\n    \n    <p>Thank you for upgrading to InsiderAlerts Pro! You now have access to our premium features:</p>\n    \n    <div class=\"features\">\n      <h3>🌟 Your Pro Benefits:</h3>\n      <div class=\"feature\">Unlimited real-time alerts</div>\n      <div class=\"feature\">Email + Telegram + SMS notifications</div>\n      <div class=\"feature\">Top 20 insider trading activities (vs 5 in Free)</div>\n      <div class=\"feature\">30-day historical data (vs 7 days)</div>\n      <div class=\"feature\">Custom filters and thresholds</div>\n      <div class=\"feature\">Priority support</div>\n    </div>\n    \n    <p><strong>Get started:</strong></p>\n    <ol>\n      <li>Connect your Telegram (optional) for instant mobile alerts</li>\n      <li>Set up custom watchlists for your favorite stocks</li>\n      <li>Adjust alert frequency to your preference</li>\n    </ol>\n    \n    <a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/settings\" class=\"button\">Configure Pro Features</a>\n    \n    <p>We're here to help you make the most of your subscription. If you have any questions, just reply to this email!</p>\n    \n    <p>To your success! 📈<br>\nThe InsiderAlerts Team</p>\n  </div>\n  <div class=\"footer\">\n    <p>&copy; {{ $now.year }} InsiderAlerts. All rights reserved.</p>\n    <p><a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/billing\">Manage subscription</a></p>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "subscription-created",
+      "name": "Send Subscription Welcome",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        400
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.user.email }}",
+        "subject": "Subscription Updated",
+        "emailType": "html",
+        "message": "=<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .header { background: #2563eb; color: white; padding: 30px; text-align: center; }\n    .content { padding: 30px; }\n    .button { display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }\n    .footer { background: #f3f4f6; padding: 20px; text-align: center; font-size: 12px; color: #666; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>Subscription Updated</h1>\n  </div>\n  <div class=\"content\">\n    <p>Hi {{ $json.user.email }},</p>\n    \n    <p>Your subscription has been updated. The changes will take effect immediately.</p>\n    \n    <p><strong>Current plan:</strong> {{ $json.metadata.plan || 'Pro' }}</p>\n    \n    <a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/billing\" class=\"button\">View Billing</a>\n    \n    <p>If you have any questions, feel free to reach out!</p>\n    \n    <p>Best,<br>The InsiderAlerts Team</p>\n  </div>\n  <div class=\"footer\">\n    <p>&copy; {{ $now.year }} InsiderAlerts. All rights reserved.</p>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "subscription-updated",
+      "name": "Send Subscription Update",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        500
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.user.email }}",
+        "subject": "We're Sorry to See You Go",
+        "emailType": "html",
+        "message": "=<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .header { background: #6b7280; color: white; padding: 30px; text-align: center; }\n    .content { padding: 30px; }\n    .button { display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }\n    .footer { background: #f3f4f6; padding: 20px; text-align: center; font-size: 12px; color: #666; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>Subscription Cancelled</h1>\n  </div>\n  <div class=\"content\">\n    <p>Hi {{ $json.user.email }},</p>\n    \n    <p>We've processed your subscription cancellation. You'll continue to have access to Pro features until the end of your current billing period.</p>\n    \n    <p><strong>Access until:</strong> {{ $json.metadata.endsAt || 'End of current period' }}</p>\n    \n    <p>We'd love to hear your feedback! What could we have done better?</p>\n    \n    <a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/feedback\" class=\"button\">Share Feedback</a>\n    \n    <p>You can reactivate your subscription anytime from your billing page.</p>\n    \n    <p>Thank you for being part of InsiderAlerts!<br>\nThe Team</p>\n  </div>\n  <div class=\"footer\">\n    <p>&copy; {{ $now.year }} InsiderAlerts. All rights reserved.</p>\n    <p><a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/billing\">Reactivate subscription</a></p>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "subscription-cancelled",
+      "name": "Send Cancellation Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        600
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "message",
+        "operation": "send",
+        "sendTo": "={{ $json.user.email }}",
+        "subject": "Password Reset Request",
+        "emailType": "html",
+        "message": "=<html>\n<head>\n  <style>\n    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }\n    .header { background: #2563eb; color: white; padding: 30px; text-align: center; }\n    .content { padding: 30px; }\n    .button { display: inline-block; padding: 12px 24px; background: #2563eb; color: white; text-decoration: none; border-radius: 5px; margin: 20px 0; }\n    .warning { background: #fef3c7; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; }\n    .footer { background: #f3f4f6; padding: 20px; text-align: center; font-size: 12px; color: #666; }\n  </style>\n</head>\n<body>\n  <div class=\"header\">\n    <h1>🔐 Password Reset</h1>\n  </div>\n  <div class=\"content\">\n    <p>Hi {{ $json.user.email }},</p>\n    \n    <p>We received a request to reset your password. Click the button below to create a new password:</p>\n    \n    <a href=\"{{ $env.NEXT_PUBLIC_APP_URL || 'https://yourdomain.com' }}/reset-password?token={{ $json.metadata.resetToken }}\" class=\"button\">Reset Password</a>\n    \n    <div class=\"warning\">\n      <strong>⚠️ Security Notice:</strong>\n      <ul>\n        <li>This link expires in 1 hour</li>\n        <li>If you didn't request this, please ignore this email</li>\n        <li>Your password won't change until you create a new one</li>\n      </ul>\n    </div>\n    \n    <p>For security reasons, we recommend using a strong, unique password.</p>\n    \n    <p>Stay secure,<br>The InsiderAlerts Team</p>\n  </div>\n  <div class=\"footer\">\n    <p>&copy; {{ $now.year }} InsiderAlerts. All rights reserved.</p>\n  </div>\n</body>\n</html>",
+        "options": {}
+      },
+      "id": "password-reset",
+      "name": "Send Password Reset Email",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        900,
+        700
+      ],
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "gmail-credentials",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.SUPABASE_URL }}/rest/v1/system_logs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $env.SUPABASE_SERVICE_KEY }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "log_level",
+              "value": "INFO"
+            },
+            {
+              "name": "workflow_name",
+              "value": "User Management"
+            },
+            {
+              "name": "node_name",
+              "value": "={{ $json.event }}"
+            },
+            {
+              "name": "message",
+              "value": "=User event processed: {{ $json.event }} for {{ $json.user.email }}"
+            },
+            {
+              "name": "metadata",
+              "value": "={{ JSON.stringify({ event: $json.event, userId: $json.user.id }) }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "log-event",
+      "name": "Log Event",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1120,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ success: true, message: 'Event processed successfully', event: $('Parse Event Data').item.json.event }) }}",
+        "options": {}
+      },
+      "id": "webhook-response",
+      "name": "Send Success Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1340,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "User Events Webhook": {
+      "main": [
+        [
+          {
+            "node": "Parse Event Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Event Data": {
+      "main": [
+        [
+          {
+            "node": "Route by Event Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route by Event Type": {
+      "main": [
+        [
+          {
+            "node": "Send Welcome Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Verification Confirmation",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Subscription Welcome",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Subscription Update",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Cancellation Email",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Password Reset Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Welcome Email": {
+      "main": [
+        [
+          {
+            "node": "Log Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Verification Confirmation": {
+      "main": [
+        [
+          {
+            "node": "Log Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Subscription Welcome": {
+      "main": [
+        [
+          {
+            "node": "Log Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Subscription Update": {
+      "main": [
+        [
+          {
+            "node": "Log Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Cancellation Email": {
+      "main": [
+        [
+          {
+            "node": "Log Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Password Reset Email": {
+      "main": [
+        [
+          {
+            "node": "Log Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Event": {
+      "main": [
+        [
+          {
+            "node": "Send Success Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all",
+    "saveManualExecutions": true
+  },
+  "versionId": "multi-user-v2",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "insider-trading-alerts-multi-user"
+  },
+  "tags": [
+    {
+      "name": "multi-user"
+    },
+    {
+      "name": "user-management"
+    }
+  ]
+}
