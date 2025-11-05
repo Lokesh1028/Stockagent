@@ -57,6 +57,8 @@ temp/
 dist/
 build/
 *.js.map
+.next/
+next-env.d.ts
 
 # Backup files
 *.backup
